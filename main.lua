@@ -43,7 +43,7 @@ local CONFIG = {
     Success = Color3.fromRGB(182, 242, 216),
     Danger = Color3.fromRGB(255, 103, 151),
 
-    SlapDelay = 0.97, -- Bus Mastery Farm Slap Clone timing
+    SlapDelay = 1.1, -- Bus Mastery Farm Slap Clone timing
     AuraDelay = 0.75, -- same default from the old Slap Aura
     AuraRange = 25,   -- same default reach from the old Slap Aura
     CloneReturnDelay = 0.16,
