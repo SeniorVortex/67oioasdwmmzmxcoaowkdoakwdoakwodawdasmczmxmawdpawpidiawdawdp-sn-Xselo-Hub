@@ -43,7 +43,7 @@ local CONFIG = {
     Success = Color3.fromRGB(182, 242, 216),
     Danger = Color3.fromRGB(255, 103, 151),
 
-    SlapDelay = 0.75, -- same default delay used by the old clone slap farm
+    SlapDelay = 0.87, -- Bus Mastery Farm Slap Clone timing
     AuraDelay = 0.75, -- same default from the old Slap Aura
     AuraRange = 25,   -- same default reach from the old Slap Aura
     CloneReturnDelay = 0.16,
@@ -228,12 +228,13 @@ end
 
 local function mainFarmCFrame()
     local base = bedBaseCFrame()
-    return base * CFrame.new(-2.15, 0, 0)
+    -- Bus Mastery pattern: keep both accounts 6.5 studs apart.
+    return base * CFrame.new(-3.25, 0, 0)
 end
 
 local function cloneFarmCFrame()
     local base = bedBaseCFrame()
-    return base * CFrame.new(2.15, 0, 0)
+    return base * CFrame.new(3.25, 0, 0)
 end
 
 local function teleportToBed(role)
@@ -393,6 +394,9 @@ local function fireSlap(targetRoot)
 
     return ok
 end
+
+local runBusStyleSlapFarm
+local busFarmGeneration = 0
 
 -- ============================================================
 -- GUI
@@ -1071,13 +1075,18 @@ local mainFarmToggle = makeToggle(mainPage, "MainFarm", "Farm Slap", 68, false, 
     state.MainFarmEnabled = v
     if v then
         ensureArenaThenTeleport("Main")
-        notify("Slap Farm", "Main Account farm enabled.", CONFIG.Success)
+        task.delay(0.25, function()
+            if runBusStyleSlapFarm then runBusStyleSlapFarm() end
+        end)
+        notify("Slap Farm", "Bus Mastery pattern enabled: 10 slaps + recovery wait.", CONFIG.Success)
     else
+        busFarmGeneration += 1
+        state.MainStatus = "Disabled"
         notify("Slap Farm", "Main Account farm disabled.", CONFIG.Purple)
     end
 end)
 
-makeSlider(mainPage, "Slap delay", 104, 0.70, 1.75, CONFIG.SlapDelay, 0.05, function(v)
+makeSlider(mainPage, "Bus slap delay", 104, 0.75, 1.25, CONFIG.SlapDelay, 0.01, function(v)
     state.SlapDelay = v
 end)
 
@@ -1487,65 +1496,109 @@ end)
 
 -- ============================================================
 -- Main Slap Farm loop
+-- Adapted from Bus Mastery -> Farm Slap Clone.
+-- 10 controlled slaps, 0.3s pause, ragdoll recovery, 0.6s pause.
 -- ============================================================
 
-local lastSlap = 0
-local lastMainReposition = 0
+local function targetRagdolled(character)
+    local flag = character and character:FindFirstChild("Ragdolled")
+    return flag and flag:IsA("BoolValue") and flag.Value or false
+end
 
-RunService.Heartbeat:Connect(function()
-    if not state.MainFarmEnabled then
-        state.MainStatus = "Disabled"
-        return
+local function waitForTargetRecovery(character, generation)
+    local started = os.clock()
+    while state.MainFarmEnabled and generation == busFarmGeneration do
+        if not character or not character.Parent then return false end
+        local flag = character:FindFirstChild("Ragdolled")
+        if not flag or not flag.Value then return true end
+        if os.clock() - started > 8 then return false end
+        task.wait(0.05)
     end
+    return false
+end
 
-    if not state.MainFarmReady then
-        state.MainStatus = "Entering arena / preparing Bed..."
-        return
-    end
+runBusStyleSlapFarm = function()
+    busFarmGeneration += 1
+    local generation = busFarmGeneration
 
-    local clonePlayer = findPlayer(state.CloneUsername)
-    if not clonePlayer then
-        state.MainStatus = state.CloneUsername == "" and "Enter the Clone username" or "Clone account not found in this server"
-        return
-    end
+    task.spawn(function()
+        while state.MainFarmEnabled and generation == busFarmGeneration do
+            if not state.MainFarmReady then
+                state.MainStatus = "Entering arena / preparing Bed..."
+                task.wait(0.15)
+                continue
+            end
 
-    local myChar, myRoot = getCharacter(LocalPlayer)
-    local cloneChar, cloneRoot = getCharacter(clonePlayer)
-    if not myChar or not cloneChar then
-        state.MainStatus = "Waiting for both characters"
-        return
-    end
+            local clonePlayer = findPlayer(state.CloneUsername)
+            if not clonePlayer then
+                state.MainStatus = state.CloneUsername == "" and "Enter the Clone username" or "Clone account not found in this server"
+                task.wait(0.25)
+                continue
+            end
 
-    -- Keep the main account at its Bed farm point.
-    local mainCF = mainFarmCFrame()
-    if (myRoot.Position - mainCF.Position).Magnitude > 10 and os.clock() - lastMainReposition > 0.35 then
-        lastMainReposition = os.clock()
-        setRootCFrame(mainCF)
-    end
+            local myChar, myRoot = getCharacter(LocalPlayer)
+            local cloneChar, cloneRoot = getCharacter(clonePlayer)
+            if not myChar or not myRoot or not cloneChar or not cloneRoot then
+                state.MainStatus = "Waiting for both characters"
+                task.wait(0.2)
+                continue
+            end
 
-    local distance = (myRoot.Position - cloneRoot.Position).Magnitude
-    state.MainStatus = string.format("Clone found • %.1f studs • %.2fs delay", distance, state.SlapDelay)
+            if not myChar:FindFirstChild("entered") or not cloneChar:FindFirstChild("entered") then
+                state.MainStatus = "Both accounts must be in arena"
+                task.wait(0.25)
+                continue
+            end
 
-    if distance <= 12 then
-        -- Face the clone for the visual click/animation.
-        local lookAt = Vector3.new(cloneRoot.Position.X, myRoot.Position.Y, cloneRoot.Position.Z)
-        if (lookAt - myRoot.Position).Magnitude > 0.1 then
-            myRoot.CFrame = CFrame.new(myRoot.Position, lookAt)
+            -- One correction per cycle, not constant Heartbeat teleports.
+            local mainCF = mainFarmCFrame()
+            if (myRoot.Position - mainCF.Position).Magnitude > 8 then
+                setRootCFrame(mainCF)
+                task.wait(0.15)
+                myChar, myRoot = getCharacter(LocalPlayer)
+                cloneChar, cloneRoot = getCharacter(clonePlayer)
+                if not myRoot or not cloneRoot then
+                    task.wait(0.2)
+                    continue
+                end
+            end
+
+            local distance = (myRoot.Position - cloneRoot.Position).Magnitude
+            state.MainStatus = string.format("Bus farm • %.1f studs • %.2fs", distance, state.SlapDelay)
+
+            if targetRagdolled(cloneChar) then
+                state.MainStatus = "Bus farm • waiting clone recovery"
+                waitForTargetRecovery(cloneChar, generation)
+                task.wait(0.6)
+                continue
+            end
+
+            if distance <= 12 then
+                local lookAt = Vector3.new(cloneRoot.Position.X, myRoot.Position.Y, cloneRoot.Position.Z)
+                if (lookAt - myRoot.Position).Magnitude > 0.1 then
+                    myRoot.CFrame = CFrame.new(myRoot.Position, lookAt)
+                end
+
+                for i = 1, 10 do
+                    if not state.MainFarmEnabled or generation ~= busFarmGeneration then break end
+                    cloneChar, cloneRoot = getCharacter(clonePlayer)
+                    if not cloneRoot then break end
+                    fireSlap(cloneRoot)
+                    state.MainStatus = string.format("Bus farm • slap %d/10 • %.2fs", i, state.SlapDelay)
+                    task.wait(state.SlapDelay)
+                end
+
+                task.wait(0.3)
+                cloneChar = clonePlayer.Character
+                if cloneChar then waitForTargetRecovery(cloneChar, generation) end
+                task.wait(0.6)
+            else
+                state.MainStatus = string.format("Bus farm • clone too far (%.1f studs)", distance)
+                task.wait(0.25)
+            end
         end
-
-        if os.clock() - lastSlap >= state.SlapDelay then
-            lastSlap = os.clock()
-            fireSlap(cloneRoot)
-        end
-    else
-        -- Still activate the current glove periodically, matching the requested continuous clicking.
-        if os.clock() - lastSlap >= state.SlapDelay then
-            lastSlap = os.clock()
-            local tool = equipCurrentTool()
-            if tool then pcall(function() tool:Activate() end) end
-        end
-    end
-end)
+    end)
+end
 
 -- ============================================================
 -- Clone helper: return to Bed after being slapped
