@@ -43,10 +43,10 @@ local CONFIG = {
     Success = Color3.fromRGB(182, 242, 216),
     Danger = Color3.fromRGB(255, 103, 151),
 
-    SlapDelay = 0.87, -- Bus Mastery Farm Slap Clone timing
+    SlapDelay = 1.35, -- conservative default: one valid slap per recovery cycle
     AuraDelay = 0.75, -- same default from the old Slap Aura
     AuraRange = 25,   -- same default reach from the old Slap Aura
-    CloneReturnDelay = 0.16,
+    CloneReturnDelay = 0.35,
 }
 
 local state = {
@@ -365,19 +365,25 @@ local function getSlapRemote()
     return nil, current
 end
 
+local lastSlapFire = 0
+local GLOBAL_SLAP_INTERVAL = 1.05
+
 local function fireSlap(targetRoot)
     if not targetRoot or not targetRoot.Parent then return false end
 
-    local tool = equipCurrentTool()
-    if tool then
-        pcall(function()
-            tool:Activate()
-        end)
+    -- Global rate limit shared by Farm + Aura. This is intentionally boring.
+    -- One clean remote call is better than two overlapping activation paths.
+    local now = os.clock()
+    if now - lastSlapFire < GLOBAL_SLAP_INTERVAL then
+        return false
     end
 
+    local tool = equipCurrentTool()
     local remote, current = getSlapRemote()
     if not remote then
-        return tool ~= nil
+        -- Do not combine Tool:Activate() with a remote call. If the game has no
+        -- supported slap remote, fail closed instead of generating duplicate hits.
+        return false
     end
 
     local ok = pcall(function()
@@ -392,6 +398,9 @@ local function fireSlap(targetRoot)
         end
     end)
 
+    if ok then
+        lastSlapFire = now
+    end
     return ok
 end
 
@@ -1078,7 +1087,7 @@ local mainFarmToggle = makeToggle(mainPage, "MainFarm", "Farm Slap", 68, false, 
         task.delay(0.25, function()
             if runBusStyleSlapFarm then runBusStyleSlapFarm() end
         end)
-        notify("Slap Farm", "Bus Mastery pattern enabled: 10 slaps + recovery wait.", CONFIG.Success)
+        notify("Slap Farm", "Safe farm enabled: one slap per recovery cycle.", CONFIG.Success)
     else
         busFarmGeneration += 1
         state.MainStatus = "Disabled"
@@ -1086,7 +1095,7 @@ local mainFarmToggle = makeToggle(mainPage, "MainFarm", "Farm Slap", 68, false, 
     end
 end)
 
-makeSlider(mainPage, "Bus slap delay", 104, 0.75, 1.25, CONFIG.SlapDelay, 0.01, function(v)
+makeSlider(mainPage, "Safe slap delay", 104, 1.10, 2.50, CONFIG.SlapDelay, 0.05, function(v)
     state.SlapDelay = v
 end)
 
@@ -1460,6 +1469,11 @@ RunService.Heartbeat:Connect(function()
         return
     end
 
+    if state.MainFarmEnabled then
+        state.AuraStatus = "Paused while Farm Slap is active"
+        return
+    end
+
     if os.clock() - lastAuraPulse < state.AuraDelay then
         return
     end
@@ -1496,8 +1510,8 @@ end)
 
 -- ============================================================
 -- Main Slap Farm loop
--- Adapted from Bus Mastery -> Farm Slap Clone.
--- 10 controlled slaps, 0.3s pause, ragdoll recovery, 0.6s pause.
+-- Conservative mode: one slap per target recovery cycle.
+-- This avoids burst-firing the hit remote while the clone is already ragdolled.
 -- ============================================================
 
 local function targetRagdolled(character)
@@ -1525,14 +1539,14 @@ runBusStyleSlapFarm = function()
         while state.MainFarmEnabled and generation == busFarmGeneration do
             if not state.MainFarmReady then
                 state.MainStatus = "Entering arena / preparing Bed..."
-                task.wait(0.15)
+                task.wait(0.25)
                 continue
             end
 
             local clonePlayer = findPlayer(state.CloneUsername)
             if not clonePlayer then
                 state.MainStatus = state.CloneUsername == "" and "Enter the Clone username" or "Clone account not found in this server"
-                task.wait(0.25)
+                task.wait(0.5)
                 continue
             end
 
@@ -1540,61 +1554,61 @@ runBusStyleSlapFarm = function()
             local cloneChar, cloneRoot = getCharacter(clonePlayer)
             if not myChar or not myRoot or not cloneChar or not cloneRoot then
                 state.MainStatus = "Waiting for both characters"
-                task.wait(0.2)
+                task.wait(0.4)
                 continue
             end
 
             if not myChar:FindFirstChild("entered") or not cloneChar:FindFirstChild("entered") then
                 state.MainStatus = "Both accounts must be in arena"
-                task.wait(0.25)
+                task.wait(0.5)
                 continue
             end
 
-            -- One correction per cycle, not constant Heartbeat teleports.
+            -- Do not keep correcting CFrame every loop. If Main gets moved far away,
+            -- pause the farm instead of fighting the server continuously.
             local mainCF = mainFarmCFrame()
-            if (myRoot.Position - mainCF.Position).Magnitude > 8 then
-                setRootCFrame(mainCF)
-                task.wait(0.15)
-                myChar, myRoot = getCharacter(LocalPlayer)
-                cloneChar, cloneRoot = getCharacter(clonePlayer)
-                if not myRoot or not cloneRoot then
-                    task.wait(0.2)
-                    continue
-                end
+            local mainDrift = (myRoot.Position - mainCF.Position).Magnitude
+            if mainDrift > 14 then
+                state.MainStatus = string.format("Paused • Main drifted %.1f studs • use TP Bed", mainDrift)
+                task.wait(0.75)
+                continue
             end
 
             local distance = (myRoot.Position - cloneRoot.Position).Magnitude
-            state.MainStatus = string.format("Bus farm • %.1f studs • %.2fs", distance, state.SlapDelay)
-
-            if targetRagdolled(cloneChar) then
-                state.MainStatus = "Bus farm • waiting clone recovery"
-                waitForTargetRecovery(cloneChar, generation)
+            if distance > 10 then
+                state.MainStatus = string.format("Paused • clone too far (%.1f studs)", distance)
                 task.wait(0.6)
                 continue
             end
 
-            if distance <= 12 then
-                local lookAt = Vector3.new(cloneRoot.Position.X, myRoot.Position.Y, cloneRoot.Position.Z)
-                if (lookAt - myRoot.Position).Magnitude > 0.1 then
-                    myRoot.CFrame = CFrame.new(myRoot.Position, lookAt)
-                end
+            if targetRagdolled(cloneChar) then
+                state.MainStatus = "Safe farm • waiting clone recovery"
+                waitForTargetRecovery(cloneChar, generation)
+                task.wait(0.45)
+                continue
+            end
 
-                for i = 1, 10 do
-                    if not state.MainFarmEnabled or generation ~= busFarmGeneration then break end
-                    cloneChar, cloneRoot = getCharacter(clonePlayer)
-                    if not cloneRoot then break end
-                    fireSlap(cloneRoot)
-                    state.MainStatus = string.format("Bus farm • slap %d/10 • %.2fs", i, state.SlapDelay)
-                    task.wait(state.SlapDelay)
-                end
+            -- Face once immediately before the slap. No per-frame CFrame writes.
+            local lookAt = Vector3.new(cloneRoot.Position.X, myRoot.Position.Y, cloneRoot.Position.Z)
+            if (lookAt - myRoot.Position).Magnitude > 0.1 then
+                myRoot.CFrame = CFrame.new(myRoot.Position, lookAt)
+            end
 
-                task.wait(0.3)
+            if fireSlap(cloneRoot) then
+                state.MainStatus = string.format("Safe farm • slapped once • %.2fs cooldown", state.SlapDelay)
+
+                -- Give replication a moment to expose Ragdolled, then wait for the
+                -- recovery if it happened. We never send extra slaps during ragdoll.
+                task.wait(0.18)
                 cloneChar = clonePlayer.Character
-                if cloneChar then waitForTargetRecovery(cloneChar, generation) end
-                task.wait(0.6)
+                if cloneChar and targetRagdolled(cloneChar) then
+                    waitForTargetRecovery(cloneChar, generation)
+                end
+
+                task.wait(state.SlapDelay)
             else
-                state.MainStatus = string.format("Bus farm • clone too far (%.1f studs)", distance)
-                task.wait(0.25)
+                state.MainStatus = "Safe farm • waiting global slap cooldown"
+                task.wait(0.35)
             end
         end
     end)
@@ -1613,12 +1627,34 @@ local function scheduleCloneReturn(reason)
     if not state.CloneHelpEnabled or cloneReturnPending then return end
     cloneReturnPending = true
 
-    task.delay(CONFIG.CloneReturnDelay, function()
+    task.spawn(function()
+        -- Never snap the clone back while it is still ragdolled / flying.
+        -- Wait for the physics state to settle first, then perform one correction.
+        local started = os.clock()
+        while state.CloneHelpEnabled do
+            local char, root = getCharacter(LocalPlayer)
+            if not char or not root then break end
+
+            local ragdolled = char:FindFirstChild("Ragdolled")
+            local stillRagdolled = ragdolled and ragdolled:IsA("BoolValue") and ragdolled.Value
+            local movingFast = root.AssemblyLinearVelocity.Magnitude > 10
+
+            if not stillRagdolled and not movingFast then
+                break
+            end
+            if os.clock() - started > 8 then
+                break
+            end
+            task.wait(0.08)
+        end
+
+        task.wait(CONFIG.CloneReturnDelay)
+        if state.CloneHelpEnabled then
+            teleportToBed("Clone")
+            lastCloneReturn = os.clock()
+            state.CloneStatus = "Returned to Bed after " .. (reason or "slap")
+        end
         cloneReturnPending = false
-        if not state.CloneHelpEnabled then return end
-        teleportToBed("Clone")
-        lastCloneReturn = os.clock()
-        state.CloneStatus = "Returned to Bed after " .. (reason or "slap")
     end)
 end
 
@@ -1692,17 +1728,10 @@ RunService.Heartbeat:Connect(function()
 
     state.CloneStatus = string.format("Main found • %.1f studs • return armed", (root.Position - mainRoot.Position).Magnitude)
 
-    -- Fallback for games that do not expose a Ragdolled BoolValue.
-    if velocity > 45 and displacement > 4 and os.clock() - lastCloneReturn > 0.35 then
-        scheduleCloneReturn("knockback")
-    elseif displacement > 18 and os.clock() - lastCloneReturn > 0.55 then
+    -- Fallback for games without a Ragdolled BoolValue: only return after the
+    -- clone has actually settled. No teleport while it is still being launched.
+    if displacement > 18 and velocity < 8 and os.clock() - lastCloneReturn > 1.25 then
         scheduleCloneReturn("displacement")
-    end
-
-    -- Face the main account while waiting.
-    local lookAt = Vector3.new(mainRoot.Position.X, root.Position.Y, mainRoot.Position.Z)
-    if (lookAt - root.Position).Magnitude > 0.1 and displacement < 8 then
-        root.CFrame = CFrame.new(root.Position, lookAt)
     end
 end)
 
