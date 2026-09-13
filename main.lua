@@ -7,7 +7,7 @@
 
     This build intentionally removes the old giant menu, glove-acquisition tools,
     anti-cheat bypasses, executor-only APIs, badge farms, mastery farms, etc.
-    Kept: Slap Farm, Clone Help, Fly, Jump, Bed safe teleport.
+    Kept: Slap Farm, Clone Help, Slap Aura, Fly, Jump, Bed safe teleport.
 ]]
 
 local Players = game:GetService("Players")
@@ -22,24 +22,30 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 local CONFIG = {
     Title = "RESENHA BATTLES",
-    Subtitle = "SLAP FARM • PRIVATE BUILD",
-    LauncherImage = "rbxassetid://103820753794350", -- Messi
-    BackgroundImage = "rbxassetid://41873477",
+    Subtitle = "SLAP FARM • SATORI BUILD",
+
+    -- rbxthumb accepts the uploaded asset/decal ID directly and avoids the
+    -- annoying Decal ID vs Image ID conversion when the image is set by script.
+    LauncherImage = "rbxthumb://type=Asset&id=103820753794350&w=420&h=420", -- Messi
+    BackgroundImage = "rbxthumb://type=Asset&id=41873477&w=768&h=432", -- Satori background
     Discord = "discord.gg/Mdbn6QW7",
 
-    Purple = Color3.fromRGB(153, 82, 255),
-    Purple2 = Color3.fromRGB(105, 47, 205),
-    Purple3 = Color3.fromRGB(69, 34, 126),
-    Background = Color3.fromRGB(12, 8, 21),
-    Surface = Color3.fromRGB(23, 15, 38),
-    Surface2 = Color3.fromRGB(31, 21, 51),
-    Surface3 = Color3.fromRGB(43, 29, 67),
-    Text = Color3.fromRGB(247, 244, 255),
-    Muted = Color3.fromRGB(171, 158, 194),
-    Success = Color3.fromRGB(135, 255, 191),
-    Danger = Color3.fromRGB(255, 115, 145),
+    -- Satori Komeiji-ish palette: deep plum, dusty rose and third-eye magenta.
+    Purple = Color3.fromRGB(218, 91, 160),
+    Purple2 = Color3.fromRGB(172, 72, 137),
+    Purple3 = Color3.fromRGB(104, 55, 101),
+    Background = Color3.fromRGB(21, 9, 24),
+    Surface = Color3.fromRGB(39, 19, 40),
+    Surface2 = Color3.fromRGB(53, 26, 54),
+    Surface3 = Color3.fromRGB(72, 35, 72),
+    Text = Color3.fromRGB(255, 239, 249),
+    Muted = Color3.fromRGB(210, 168, 200),
+    Success = Color3.fromRGB(182, 242, 216),
+    Danger = Color3.fromRGB(255, 103, 151),
 
     SlapDelay = 0.75, -- same default delay used by the old clone slap farm
+    AuraDelay = 0.75, -- same default from the old Slap Aura
+    AuraRange = 25,   -- same default reach from the old Slap Aura
     CloneReturnDelay = 0.16,
 }
 
@@ -55,6 +61,11 @@ local state = {
     MainFarmReady = false,
     CloneHelpReady = false,
     SlapDelay = CONFIG.SlapDelay,
+
+    AuraEnabled = false,
+    AuraRange = CONFIG.AuraRange,
+    AuraDelay = CONFIG.AuraDelay,
+    AuraStatus = "Press H to toggle",
 
     FlyEnabled = false,
     FlySpeed = 50,
@@ -535,7 +546,7 @@ local bgImage = new("ImageLabel", {
 }, window)
 
 local bgTint = new("Frame", {
-    BackgroundColor3 = Color3.fromRGB(23, 10, 38),
+    BackgroundColor3 = Color3.fromRGB(48, 20, 46),
     BackgroundTransparency = 0.28,
     BorderSizePixel = 0,
     Size = UDim2.fromScale(1, 1),
@@ -560,7 +571,7 @@ local grad = new("UIGradient", {
 
 -- Sidebar
 local sidebar = new("Frame", {
-    BackgroundColor3 = Color3.fromRGB(13, 8, 24),
+    BackgroundColor3 = Color3.fromRGB(27, 11, 30),
     BackgroundTransparency = 0.16,
     BorderSizePixel = 0,
     Position = UDim2.new(0, 0, 0, 0),
@@ -1104,6 +1115,34 @@ makeButton(clonePage, "TP to Safe Box  •  Bed", 188, function()
     notify("Safe Box", "Teleporting Clone Account to the Bed safe spot.", CONFIG.Purple)
 end)
 
+-- Slap Aura card (ported from the old menu's normal aura behavior)
+local auraCard = makeCard(240)
+makeLabel(auraCard, "Slap Aura  •  H", 14, 20, false)
+makeLabel(auraCard, "H toggles the aura. It uses your currently equipped glove.", 34, 18, true)
+
+local auraInner = new("Frame", {
+    BackgroundTransparency = 1,
+    Position = UDim2.new(0, 14, 0, 56),
+    Size = UDim2.new(1, -28, 1, -66),
+    ZIndex = 17,
+}, auraCard)
+
+local auraToggle = makeToggle(auraInner, "SlapAura", "Slap Aura", 0, false, function(v)
+    state.AuraEnabled = v
+    state.AuraStatus = v and "Armed • scanning nearby players" or "Press H to toggle"
+    notify("Slap Aura", v and "Aura enabled [H]." or "Aura disabled [H].", v and CONFIG.Success or CONFIG.Purple)
+end)
+
+makeSlider(auraInner, "Reach", 38, 10, 50, CONFIG.AuraRange, 1, function(v)
+    state.AuraRange = v
+end)
+
+makeSlider(auraInner, "Aura delay", 88, 0.35, 1.00, CONFIG.AuraDelay, 0.05, function(v)
+    state.AuraDelay = v
+end)
+
+local auraStatusLabel = makeLabel(auraInner, "Status: press H to toggle", 142, 18, true)
+
 -- Movement card
 local movementCard = makeCard(186)
 makeLabel(movementCard, "Movement", 14, 20, false)
@@ -1351,9 +1390,98 @@ header.InputEnded:Connect(function(input)
 end)
 
 UserInputService.InputBegan:Connect(function(input, processed)
-    if processed then return end
+    if processed or UserInputService:GetFocusedTextBox() then return end
+
     if input.KeyCode == Enum.KeyCode.RightShift then
         setMenuOpen(not state.MenuOpen)
+    elseif input.KeyCode == Enum.KeyCode.H then
+        local toggle = toggleObjects.SlapAura
+        if toggle then
+            toggle:SetValue(not toggle.Value)
+        else
+            state.AuraEnabled = not state.AuraEnabled
+        end
+    end
+end)
+
+-- ============================================================
+-- Slap Aura loop
+-- Based on the old menu's Normal Slap Aura defaults: 25-stud reach,
+-- 0.75-second delay, current-glove hit remote, H as the toggle key.
+-- ============================================================
+
+local lastAuraPulse = 0
+
+local function isAuraTarget(player)
+    if player == LocalPlayer then return false end
+
+    local char, root, humanoid = getCharacter(player)
+    if not char or not root or not humanoid or humanoid.Health <= 0 then
+        return false
+    end
+
+    -- Old Slap Battles clones commonly mark players inside the arena with "entered".
+    -- If the marker exists in this build, respect it. If the clone omits it, stay compatible.
+    local entered = char:FindFirstChild("entered")
+    if entered and entered:IsA("BoolValue") and not entered.Value then
+        return false
+    end
+
+    if root.BrickColor == BrickColor.new("New Yeller") then
+        return false
+    end
+
+    local ragdolled = char:FindFirstChild("Ragdolled")
+    if ragdolled and ragdolled:IsA("BoolValue") and ragdolled.Value and state.AuraDelay <= 0.70 then
+        return false
+    end
+
+    local head = char:FindFirstChild("Head")
+    local glove = getCurrentGlove()
+    if head and head:FindFirstChild("UnoReverseCard") and glove ~= "Error" then
+        return false
+    end
+
+    return true, char, root
+end
+
+RunService.Heartbeat:Connect(function()
+    if not state.AuraEnabled then
+        state.AuraStatus = "Press H to toggle"
+        return
+    end
+
+    if os.clock() - lastAuraPulse < state.AuraDelay then
+        return
+    end
+    lastAuraPulse = os.clock()
+
+    local myChar, myRoot = getCharacter(LocalPlayer)
+    if not myChar or not myRoot then
+        state.AuraStatus = "Waiting for character"
+        return
+    end
+
+    local hits = 0
+    local nearest = math.huge
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        local ok, _, targetRoot = isAuraTarget(player)
+        if ok and targetRoot then
+            local distance = (myRoot.Position - targetRoot.Position).Magnitude
+            if distance <= state.AuraRange then
+                nearest = math.min(nearest, distance)
+                if fireSlap(targetRoot) then
+                    hits += 1
+                end
+            end
+        end
+    end
+
+    if hits > 0 then
+        state.AuraStatus = string.format("Active • %d hit(s) • nearest %.1f studs", hits, nearest)
+    else
+        state.AuraStatus = string.format("Active • no targets inside %.0f studs", state.AuraRange)
     end
 end)
 
@@ -1610,10 +1738,14 @@ RunService.RenderStepped:Connect(function()
         cloneStatusLabel.Text = "Status: " .. state.CloneStatus
         cloneStatusLabel.TextColor3 = state.CloneHelpEnabled and CONFIG.Success or CONFIG.Muted
     end
+    if auraStatusLabel and auraStatusLabel.Parent then
+        auraStatusLabel.Text = "Status: " .. state.AuraStatus
+        auraStatusLabel.TextColor3 = state.AuraEnabled and CONFIG.Success or CONFIG.Muted
+    end
 end)
 
 -- Initial setup
 ensureSafeBed()
 setAccountTab("Main")
-notify("Resenha Battles", "Slap Farm loaded. Main + Clone, two accounts, one profoundly unnecessary industrial process.", CONFIG.Purple)
+notify("Resenha Battles", "Satori build loaded. H toggles Slap Aura. Main + Clone farm ready.", CONFIG.Purple)
 
