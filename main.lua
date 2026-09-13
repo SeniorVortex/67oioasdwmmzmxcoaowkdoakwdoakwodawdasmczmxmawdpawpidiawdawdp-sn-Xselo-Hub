@@ -642,7 +642,7 @@ stroke(navButton, CONFIG.Purple, 1, 0.55)
 
 local discordButton = new("TextButton", {
     BackgroundColor3 = CONFIG.Surface2,
-    BackgroundTransparency = 0.13,
+    BackgroundTransparency = 0.20,
     AnchorPoint = Vector2.new(0, 1),
     Position = UDim2.new(0, 12, 1, -56),
     Size = UDim2.new(1, -24, 0, 44),
@@ -710,7 +710,7 @@ new("TextLabel", {
 
 local closeButton = new("TextButton", {
     BackgroundColor3 = CONFIG.Surface2,
-    BackgroundTransparency = 0.15,
+    BackgroundTransparency = 0.22,
     AnchorPoint = Vector2.new(1, 0),
     Position = UDim2.new(1, 0, 0, 0),
     Size = UDim2.new(0, 36, 0, 36),
@@ -744,7 +744,7 @@ padding(scroll, 0, 6, 0, 10)
 local function makeCard(height)
     local card = new("Frame", {
         BackgroundColor3 = CONFIG.Surface,
-        BackgroundTransparency = 0.12,
+        BackgroundTransparency = 0.17,
         Size = UDim2.new(1, -6, 0, height),
         ZIndex = 16,
     }, scroll)
@@ -766,7 +766,7 @@ corner(tabBar, 12)
 
 local mainTabButton = new("TextButton", {
     BackgroundColor3 = CONFIG.Purple,
-    BackgroundTransparency = 0.12,
+    BackgroundTransparency = 0.20,
     Position = UDim2.new(0, 4, 0, 4),
     Size = UDim2.new(0.5, -6, 1, -8),
     AutoButtonColor = false,
@@ -859,7 +859,7 @@ end
 local function makeButton(parent, text, y, callback)
     local b = new("TextButton", {
         BackgroundColor3 = CONFIG.Surface2,
-        BackgroundTransparency = 0.06,
+        BackgroundTransparency = 0.14,
         Position = UDim2.new(0, 0, 0, y),
         Size = UDim2.new(1, 0, 0, 38),
         AutoButtonColor = false,
@@ -873,10 +873,10 @@ local function makeButton(parent, text, y, callback)
     stroke(b, CONFIG.Purple, 1, 0.66)
 
     b.MouseEnter:Connect(function()
-        tween(b, 0.12, {BackgroundColor3 = CONFIG.Surface3, BackgroundTransparency = 0})
+        tween(b, 0.12, {BackgroundColor3 = CONFIG.Surface3, BackgroundTransparency = 0.08})
     end)
     b.MouseLeave:Connect(function()
-        tween(b, 0.12, {BackgroundColor3 = CONFIG.Surface2, BackgroundTransparency = 0.06})
+        tween(b, 0.12, {BackgroundColor3 = CONFIG.Surface2, BackgroundTransparency = 0.14})
     end)
     b.MouseButton1Click:Connect(function()
         tween(b, 0.07, {Size = UDim2.new(1, -4, 0, 36), Position = UDim2.new(0, 2, 0, y + 1)})
